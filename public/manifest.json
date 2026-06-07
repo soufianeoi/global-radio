@@ -1,0 +1,17 @@
+{
+  "name": "Global Radio",
+  "short_name": "Global Radio",
+  "description": "Explore and play global internet radio stations on an interactive 3D globe",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "icons": [
+    {
+      "src": "/earth-texture.jpg",
+      "sizes": "512x512",
+      "type": "image/jpg",
+      "purpose": "any maskable"
+    }
+  ]
+}

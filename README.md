@@ -2,6 +2,12 @@
 
 A single-page web app for exploring and playing global internet radio stations on an interactive 3D globe.
 
+## Screenshot
+
+![Global Radio screenshot](screenshot.png)
+<!-- Replace `screenshot.png` with an actual screenshot of the app.
+     Take one manually from your browser: full viewport showing globe + station grid + player bar. -->
+
 ## Features
 
 - **3D Globe** — Interactive WebGL globe with station markers using [globe.gl](https://globe.gl/)
@@ -14,10 +20,14 @@ A single-page web app for exploring and playing global internet radio stations o
 - **Dark Mode** — Theme toggle with OS preference detection and persistent setting
 - **Sleep Timer** — 15/30/45/60 minute auto-stop timer
 - **Volume Control** — Slider with percentage display and mute toggle
+- **Audio Visualizer** — Real-time frequency bars via Web Audio API AnalyserNode
 - **Buffering Indicator** — Animated spinner while a stream connects
 - **Error Handling** — Retry button if the API fails to load
 - **Empty State** — Clear message and "Clear filters" button when no stations match
+- **Recent Stations** — Last 30 played stations remembered in localStorage
+- **Share Links** — Shareable station URLs via hash fragment + native share or clipboard
 - **Keyboard Accessible** — Full keyboard navigation and screen reader support
+- **PWA Ready** — Service worker + manifest for installable offline-capable app
 
 ## Tech Stack
 
