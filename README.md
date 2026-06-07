@@ -6,13 +6,18 @@ A single-page web app for exploring and playing global internet radio stations o
 
 - **3D Globe** — Interactive WebGL globe with station markers using [globe.gl](https://globe.gl/)
 - **Live Radio Data** — Fetches 500 top-clicked stations from [radio-browser.info](https://www.radio-browser.info/) with client-side health filtering
-- **Station Cards** — Three-column grid with country, genre tags, and color-coded status dots
+- **Station Cards** — Three-column grid with country, genre tags, and color-coded status dots with equalizer animation on playback
 - **Two-Way Sync** — Hover/click a globe marker or a station card; both highlight and scroll in sync
-- **Faceted Filters** — Country + genre dropdowns with live relative counts that recompute as you filter
+- **Faceted Filters** — Country + genre dropdowns with live relative counts that recompute as you filter; persisted in the URL
 - **⌘K Search** — Modal search across station names, countries, tags, and states
 - **Favorites** — Heart stations; persisted in `localStorage`
+- **Dark Mode** — Theme toggle with OS preference detection and persistent setting
 - **Sleep Timer** — 15/30/45/60 minute auto-stop timer
-- **Minimal UI** — White Linear/Vercel aesthetic, Inter font, hand-written CSS
+- **Volume Control** — Slider with percentage display and mute toggle
+- **Buffering Indicator** — Animated spinner while a stream connects
+- **Error Handling** — Retry button if the API fails to load
+- **Empty State** — Clear message and "Clear filters" button when no stations match
+- **Keyboard Accessible** — Full keyboard navigation and screen reader support
 
 ## Tech Stack
 
@@ -39,12 +44,11 @@ Output goes to `dist/`.
 
 ## Deploy
 
-### GitHub Pages
+### GitHub Pages (already configured)
 
-1. Push this repo to GitHub
-2. Go to **Settings → Pages**
-3. Set **Source** to "GitHub Actions"
-4. Use the included workflow (`.github/workflows/deploy.yml`) or Vite's default Pages action
+Push to `main` — the included GitHub Action builds and deploys automatically.
+
+**Live:** https://soufianeoi.github.io/global-radio/
 
 ### Vercel / Netlify
 
