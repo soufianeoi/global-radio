@@ -1,3 +1,5 @@
+import Globe from 'globe.gl';
+
 /* ===== Config ===== */
 const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/500';
 const RETRIES = 3;
@@ -11,19 +13,17 @@ const GENRE_PALETTE = [
 const DOT_COLORS = {
   default: '#888888',
   playing: '#10b981',
+  favorite: '#f59e0b',
   highlighted: '#3b82f6'
 };
 const GLOBE_TEXTURE = `${import.meta.env.BASE_URL}earth-texture.jpg`;
 const GLOBE_TEXTURE_FALLBACK = `${import.meta.env.BASE_URL}earth-texture.jpg`;
 const VOLUME_STORAGE_KEY = 'radio-volume';
-const RECENT_STORAGE_KEY = 'radio-recent';
-const MAX_RECENT = 30;
 
 /* ===== State ===== */
 const state = {
   allStations: [],
   filteredStations: [],
-  recentStations: [],
   favorites: new Set(),
   activeFilters: { country: '', genre: '', favoritesOnly: false },
   searchQuery: '',
@@ -31,9 +31,6 @@ const state = {
   isPlaying: false,
   isBuffering: false,
   audio: null,
-  audioCtx: null,
-  analyser: null,
-  visualizerData: null,
   globe: null,
   markerCache: new Map(),
   sleepTimerId: null,
@@ -43,7 +40,6 @@ const state = {
   darkMode: false,
   isMuted: false,
   previousVolume: 0.8,
-  stationMap: new Map(),
 };
 
 /* ===== Utilities ===== */
@@ -85,7 +81,9 @@ function applyTheme(dark) {
   localStorage.setItem('radio-theme', dark ? 'dark' : 'light');
 }
 
-function toggleTheme() { applyTheme(!state.darkMode); }
+function toggleTheme() {
+  applyTheme(!state.darkMode);
+}
 
 function loadTheme() {
   const saved = localStorage.getItem('radio-theme');
@@ -99,7 +97,11 @@ async function fetchWithRetry(url, retries = RETRIES) {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT);
     try {
-      const res = await fetch(url, { signal: ac.signal, mode: 'cors' });
+      const res = await fetch(url, {
+        headers: { 'User-Agent': 'GlobalRadioApp/1.0' },
+        signal: ac.signal,
+        mode: 'cors'
+      });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
@@ -115,37 +117,41 @@ async function fetchWithRetry(url, retries = RETRIES) {
 function isHealthy(station) {
   const url = station.url_resolved || station.url;
   if (!url || !url.startsWith('https://')) return false;
+
   const codec = (station.codec || '').toUpperCase();
   if (!codec || !KNOWN_CODECS.some(k => codec.includes(k))) return false;
+
   const lat = parseFloat(station.geo_lat);
   const lng = parseFloat(station.geo_long);
   if (isNaN(lat) || isNaN(lng) || (lat === 0 && lng === 0)) return false;
+
   return true;
 }
 
 function parseTags(station) {
-  return (station.tags || '').split(',').map(t => t.trim().toLowerCase()).filter(t => t.length > 0 && t.length < 30);
+  return (station.tags || '')
+    .split(',')
+    .map(t => t.trim().toLowerCase())
+    .filter(t => t.length > 0 && t.length < 30);
 }
 
 async function loadStations() {
   const data = await fetchWithRetry(API_URL);
-  state.allStations = data.filter(isHealthy).map((s, i) => {
-    const enriched = {
-      ...s,
-      _idx: i,
-      _tags: parseTags(s),
-      _color: getStationColor(s),
-      _lat: parseFloat(s.geo_lat),
-      _lng: parseFloat(s.geo_long),
-    };
-    state.stationMap.set(s.stationuuid, enriched);
-    return enriched;
-  });
+  state.allStations = data.filter(isHealthy).map((s, i) => ({
+    ...s,
+    _idx: i,
+    _tags: parseTags(s),
+    _color: getStationColor(s),
+    _lat: parseFloat(s.geo_lat),
+    _lng: parseFloat(s.geo_long),
+  }));
 }
 
 /* ===== Marker Cache ===== */
 function getMarkerData(station) {
-  if (state.markerCache.has(station.stationuuid)) return state.markerCache.get(station.stationuuid);
+  if (state.markerCache.has(station.stationuuid)) {
+    return state.markerCache.get(station.stationuuid);
+  }
   const obj = {
     stationuuid: station.stationuuid,
     lat: station._lat,
@@ -164,30 +170,37 @@ function getMarkerData(station) {
 /* ===== Filtering ===== */
 function applyFilters() {
   const { country, genre, favoritesOnly } = state.activeFilters;
+
   state.filteredStations = state.allStations.filter(s => {
     if (country && s.country !== country) return false;
     if (genre && !s._tags.includes(genre.toLowerCase())) return false;
     if (favoritesOnly && !state.favorites.has(s.stationuuid)) return false;
     return true;
   });
+
   syncFiltersToURL();
   updateUI();
 }
 
 function computeFilterCounts() {
   const { country, genre, favoritesOnly } = state.activeFilters;
+
   const countryCounts = new Map();
   state.allStations.forEach(s => {
     if (genre && !s._tags.includes(genre.toLowerCase())) return;
     if (favoritesOnly && !state.favorites.has(s.stationuuid)) return;
     countryCounts.set(s.country, (countryCounts.get(s.country) || 0) + 1);
   });
+
   const genreCounts = new Map();
   state.allStations.forEach(s => {
     if (country && s.country !== country) return;
     if (favoritesOnly && !state.favorites.has(s.stationuuid)) return;
-    s._tags.forEach(tag => { genreCounts.set(tag, (genreCounts.get(tag) || 0) + 1); });
+    s._tags.forEach(tag => {
+      genreCounts.set(tag, (genreCounts.get(tag) || 0) + 1);
+    });
   });
+
   return { countryCounts, genreCounts };
 }
 
@@ -208,75 +221,57 @@ function readFiltersFromURL() {
   if (params.has('fav')) state.activeFilters.favoritesOnly = true;
 }
 
-/* ===== Share Links ===== */
-function readStationFromHash() {
-  const hash = window.location.hash.slice(1);
-  if (!hash) return;
-  loadStationByUUID(hash);
-}
-
-function updateHash(uuid) {
-  window.history.replaceState(null, '', `#${uuid}`);
-}
-
-function shareStation() {
-  if (!state.currentStation) return;
-  const url = `${window.location.origin}${window.location.pathname}#${state.currentStation.stationuuid}`;
-  if (navigator.share) {
-    navigator.share({ title: state.currentStation.name, url });
-  } else {
-    navigator.clipboard.writeText(url).then(() => {
-      const btn = $('#share-btn');
-      const orig = btn.innerHTML;
-      btn.innerHTML = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"></polyline></svg>';
-      setTimeout(() => { btn.innerHTML = orig; }, 2000);
-    }).catch(() => {});
-  }
-}
-
-function loadStationByUUID(uuid) {
-  const station = state.stationMap.get(uuid) || state.allStations.find(s => s.stationuuid === uuid);
-  if (station) {
-    playStation(station);
-    highlightStation(uuid);
-    scrollToCard(uuid);
-  }
-}
-
 /* ===== Globe ===== */
-async function initGlobe() {
-  const { default: Globe } = await import('globe.gl');
+function initGlobe() {
   const container = $('#globe-container');
   const w = Math.max(container.clientWidth, 300);
   const h = Math.max(container.clientHeight, 200);
 
   state.globe = Globe()(container)
-    .width(w).height(h)
+    .width(w)
+    .height(h)
     .globeImageUrl(GLOBE_TEXTURE)
     .backgroundColor('rgba(255,255,255,0)')
-    .atmosphereColor('#e8e8e8').atmosphereAltitude(0.15).showGraticules(true)
-    .pointsData([]).pointLat('lat').pointLng('lng').pointColor('color')
-    .pointRadius('radius').pointAltitude('altitude').pointLabel('label')
-    .onPointClick(handleMarkerClick).onPointHover(handleMarkerHover);
+    .atmosphereColor('#e8e8e8')
+    .atmosphereAltitude(0.15)
+    .showGraticules(true)
+    .pointsData([])
+    .pointLat('lat')
+    .pointLng('lng')
+    .pointColor('color')
+    .pointRadius('radius')
+    .pointAltitude('altitude')
+    .pointLabel('label')
+    .onPointClick(handleMarkerClick)
+    .onPointHover(handleMarkerHover);
 
   state.globe.controls().autoRotate = true;
   state.globe.controls().autoRotateSpeed = 0.6;
 
-  const img = new Image();
-  img.onerror = () => { if (state.globe) state.globe.globeImageUrl(GLOBE_TEXTURE_FALLBACK); };
-  img.src = GLOBE_TEXTURE;
+  // Texture fallback
+  const texLoader = state.globe.globeImageUrl;
+  if (texLoader) {
+    const img = new Image();
+    img.onerror = () => {
+      if (state.globe) state.globe.globeImageUrl(GLOBE_TEXTURE_FALLBACK);
+    };
+    img.src = GLOBE_TEXTURE;
+  }
 
   const ro = new ResizeObserver(() => {
     const w = container.clientWidth;
     const h = container.clientHeight;
-    if (w > 0 && h > 0 && state.globe) state.globe.width(w).height(h);
+    if (w > 0 && h > 0 && state.globe) {
+      state.globe.width(w).height(h);
+    }
   });
   ro.observe(container);
 }
 
 function updateGlobe() {
   if (!state.globe) return;
-  state.globe.pointsData(state.filteredStations.map(s => getMarkerData(s)));
+  const points = state.filteredStations.map(s => getMarkerData(s));
+  state.globe.pointsData(points);
 }
 
 function handleMarkerClick(point) {
@@ -292,13 +287,20 @@ function handleMarkerClick(point) {
 }
 
 function handleMarkerHover(point) {
-  if (point && point.station) highlightCard(point.station.stationuuid);
-  else unhighlightCard();
+  if (point && point.station) {
+    highlightCard(point.station.stationuuid);
+  } else {
+    unhighlightCard();
+  }
 }
 
 function highlightMarker(stationuuid) {
   const marker = state.markerCache.get(stationuuid);
-  if (marker) { marker.radius = 0.7; marker.color = DOT_COLORS.highlighted; updateGlobe(); }
+  if (marker) {
+    marker.radius = 0.7;
+    marker.color = DOT_COLORS.highlighted;
+    updateGlobe();
+  }
 }
 
 function unhighlightMarker(stationuuid) {
@@ -316,90 +318,115 @@ function renderCards() {
   const grid = $('#station-grid');
   grid.innerHTML = '';
 
-  // Recent section
-  if (!state.activeFilters.country && !state.activeFilters.genre && !state.activeFilters.favoritesOnly && state.recentStations.length > 0) {
-    const header = document.createElement('div');
-    header.className = 'section-header';
-    header.innerHTML = '<span>Recent</span>';
-    grid.appendChild(header);
-    state.recentStations.forEach(uuid => {
-      const station = state.stationMap.get(uuid) || state.allStations.find(s => s.stationuuid === uuid);
-      if (station) grid.appendChild(createCard(station));
-    });
-  }
-
   state.filteredStations.forEach(station => {
-    grid.appendChild(createCard(station));
-  });
-
-  showEmptyState(state.filteredStations.length === 0 && state.recentStations.length === 0);
-}
-
-function createCard(station) {
-  const card = document.createElement('div');
-  card.className = 'station-card';
-  card.dataset.uuid = station.stationuuid;
-  card.role = 'button';
-  card.tabIndex = 0;
-  if (station.stationuuid === state.currentStation?.stationuuid) card.classList.add('active', 'playing');
-  if (state.favorites.has(station.stationuuid)) card.classList.add('favorite');
-
-  const topTag = station._tags[0] || station.codec || 'radio';
-  const isFav = state.favorites.has(station.stationuuid);
-
-  card.innerHTML = `
-    <div class="card-top">
-      <div class="card-status" style="background:${station._color}"></div>
-      <div class="eq-bars"><span></span><span></span><span></span></div>
-      <button class="card-fav" data-uuid="${station.stationuuid}" title="Favorite" aria-label="Toggle favorite">
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="currentColor" stroke-width="2">
-          <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
-        </svg>
-      </button>
-    </div>
-    <div class="card-name">${escapeHtml(station.name)}</div>
-    <div class="card-meta">
-      <span class="card-tag">${escapeHtml(station.country || 'Unknown')}</span>
-      <span class="card-tag">${escapeHtml(topTag)}</span>
-    </div>`;
-
-  card.addEventListener('click', (e) => {
-    if (e.target.closest('.card-fav')) { e.stopPropagation(); toggleFavorite(station.stationuuid); return; }
-    playStation(station);
-    highlightStation(station.stationuuid);
-    if (state.globe && state.globe.pointOfView) {
-      state.globe.controls().autoRotate = false;
-      state.globe.pointOfView({ lat: station._lat, lng: station._lng, altitude: 1.5 }, 1000);
-      setTimeout(() => { state.globe.controls().autoRotate = true; }, 1500);
+    const card = document.createElement('div');
+    card.className = 'station-card';
+    card.dataset.uuid = station.stationuuid;
+    card.role = 'button';
+    card.tabIndex = 0;
+    if (station.stationuuid === state.currentStation?.stationuuid) {
+      card.classList.add('active', 'playing');
     }
+    if (state.favorites.has(station.stationuuid)) {
+      card.classList.add('favorite');
+    }
+
+    const topTag = station._tags[0] || station.codec || 'radio';
+    const isFav = state.favorites.has(station.stationuuid);
+
+    card.innerHTML = `
+      <div class="card-top">
+        <div class="card-status" style="background:${station._color}"></div>
+        <div class="eq-bars">
+          <span></span><span></span><span></span>
+        </div>
+        <button class="card-fav" data-uuid="${station.stationuuid}" title="Favorite" aria-label="Toggle favorite">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="currentColor" stroke-width="2">
+            <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+          </svg>
+        </button>
+      </div>
+      <div class="card-name">${escapeHtml(station.name)}</div>
+      <div class="card-meta">
+        <span class="card-tag">${escapeHtml(station.country || 'Unknown')}</span>
+        <span class="card-tag">${escapeHtml(topTag)}</span>
+      </div>
+    `;
+
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.card-fav')) {
+        e.stopPropagation();
+        toggleFavorite(station.stationuuid);
+        return;
+      }
+      playStation(station);
+      highlightStation(station.stationuuid);
+      if (state.globe && state.globe.pointOfView) {
+        state.globe.controls().autoRotate = false;
+        state.globe.pointOfView({ lat: station._lat, lng: station._lng, altitude: 1.5 }, 1000);
+        setTimeout(() => { state.globe.controls().autoRotate = true; }, 1500);
+      }
+    });
+
+    card.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        card.click();
+      }
+    });
+
+    card.addEventListener('mouseenter', () => {
+      highlightMarker(station.stationuuid);
+    });
+
+    card.addEventListener('mouseleave', () => {
+      if (station.stationuuid !== state.currentStation?.stationuuid) {
+        unhighlightMarker(station.stationuuid);
+      }
+    });
+
+    grid.appendChild(card);
   });
-  card.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); card.click(); } });
-  card.addEventListener('mouseenter', () => { highlightMarker(station.stationuuid); });
-  card.addEventListener('mouseleave', () => { if (station.stationuuid !== state.currentStation?.stationuuid) unhighlightMarker(station.stationuuid); });
-  return card;
+
+  showEmptyState(state.filteredStations.length === 0);
 }
 
 function highlightCard(stationuuid) {
   $$('.station-card').forEach(c => c.classList.remove('highlighted'));
   const card = $(`.station-card[data-uuid="${stationuuid}"]`);
-  if (card) { card.classList.add('highlighted'); card.scrollIntoView({ behavior: 'smooth', block: 'nearest' }); }
+  if (card) {
+    card.classList.add('highlighted');
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
-function unhighlightCard() { $$('.station-card').forEach(c => c.classList.remove('highlighted')); }
+function unhighlightCard() {
+  $$('.station-card').forEach(c => c.classList.remove('highlighted'));
+}
 
 function scrollToCard(stationuuid) {
   const card = $(`.station-card[data-uuid="${stationuuid}"]`);
-  if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  if (card) {
+    card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
 }
 
 function highlightStation(stationuuid) {
   state.highlightedStation = stationuuid;
-  $$('.station-card').forEach(c => c.classList.toggle('active', c.dataset.uuid === stationuuid));
+  $$('.station-card').forEach(c => {
+    c.classList.toggle('active', c.dataset.uuid === stationuuid);
+    c.classList.toggle('playing', c.dataset.uuid === stationuuid);
+  });
   state.markerCache.forEach((marker, uuid) => {
     const station = state.allStations.find(s => s.stationuuid === uuid);
     if (!station) return;
-    marker.radius = uuid === stationuuid ? 0.5 : 0.35;
-    marker.color = uuid === stationuuid ? DOT_COLORS.playing : station._color;
+    if (uuid === stationuuid) {
+      marker.radius = 0.5;
+      marker.color = DOT_COLORS.playing;
+    } else {
+      marker.radius = 0.35;
+      marker.color = station._color;
+    }
   });
   updateGlobe();
 }
@@ -412,107 +439,64 @@ function showEmptyState(show) {
     empty.style.display = 'flex';
     grid.style.display = 'none';
     const { country, genre, favoritesOnly } = state.activeFilters;
-    if (favoritesOnly) $('#empty-state-text').textContent = 'No favorites match your filters';
-    else if (country || genre) $('#empty-state-text').textContent = 'No stations match your filters';
-    else $('#empty-state-text').textContent = 'No stations found';
+    if (favoritesOnly) {
+      $('#empty-state-text').textContent = 'No favorites match your filters';
+    } else if (country || genre) {
+      $('#empty-state-text').textContent = 'No stations match your filters';
+    } else {
+      $('#empty-state-text').textContent = 'No stations found';
+    }
   } else {
     empty.style.display = 'none';
-    grid.style.display = '';
+    grid.style.display = show ? 'none' : '';
   }
-}
-
-/* ===== Audio Visualizer ===== */
-function initVisualizer() {
-  const canvas = $('#visualizer');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  state.visualizerData = { canvas, ctx };
-
-  function draw() {
-    if (!state.isPlaying || !state.analyser) {
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      if (state.isPlaying) requestAnimationFrame(draw);
-      return;
-    }
-    const bufferLength = state.analyser.frequencyBinCount;
-    const dataArray = new Uint8Array(bufferLength);
-    state.analyser.getByteFrequencyData(dataArray);
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    const w = canvas.width, h = canvas.height;
-    const barCount = 64;
-    const step = Math.floor(bufferLength / barCount);
-    const barW = w / barCount;
-    const isDark = state.darkMode;
-
-    for (let i = 0; i < barCount; i++) {
-      let val = 0;
-      for (let j = 0; j < step; j++) val += dataArray[i * step + j];
-      val = val / step / 255;
-      const barH = val * h * 0.9;
-      const hue = 120 + val * 120;
-      ctx.fillStyle = isDark ? `hsl(${hue}, 70%, 60%)` : `hsl(${hue}, 70%, 45%)`;
-      ctx.fillRect(i * barW + 1, h - barH, barW - 2, barH);
-    }
-    requestAnimationFrame(draw);
-  }
-  draw();
-}
-
-function connectVisualizer() {
-  try {
-    if (state.audioCtx) {
-      state.audioCtx.close();
-      state.audioCtx = null;
-      state.analyser = null;
-    }
-    state.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-    const src = state.audioCtx.createMediaElementSource(state.audio);
-    state.analyser = state.audioCtx.createAnalyser();
-    state.analyser.fftSize = 256;
-    src.connect(state.analyser);
-    state.analyser.connect(state.audioCtx.destination);
-  } catch (e) {
-    // Visualizer not available
-  }
-}
-
-/* ===== Recent Stations ===== */
-function loadRecent() {
-  try {
-    const data = JSON.parse(localStorage.getItem(RECENT_STORAGE_KEY) || '[]');
-    state.recentStations = data;
-  } catch { state.recentStations = []; }
-}
-
-function saveRecent() {
-  localStorage.setItem(RECENT_STORAGE_KEY, JSON.stringify(state.recentStations));
-}
-
-function addRecent(uuid) {
-  state.recentStations = state.recentStations.filter(id => id !== uuid);
-  state.recentStations.unshift(uuid);
-  if (state.recentStations.length > MAX_RECENT) state.recentStations.pop();
-  saveRecent();
 }
 
 /* ===== Player ===== */
 function initAudio() {
   state.audio = new Audio();
+
   const savedVol = localStorage.getItem(VOLUME_STORAGE_KEY);
   if (savedVol !== null) {
     state.audio.volume = parseFloat(savedVol);
     $('#volume').value = state.audio.volume;
     updateVolumeDisplay();
-  } else state.audio.volume = 0.8;
+  } else {
+    state.audio.volume = 0.8;
+  }
 
-  state.audio.addEventListener('play', () => { state.isPlaying = true; state.isBuffering = false; updatePlayerUI(); });
-  state.audio.addEventListener('pause', () => { state.isPlaying = false; state.isBuffering = false; updatePlayerUI(); });
-  state.audio.addEventListener('waiting', () => { state.isBuffering = true; updatePlayerUI(); });
-  state.audio.addEventListener('canplay', () => { state.isBuffering = false; updatePlayerUI(); });
-  state.audio.addEventListener('playing', () => { state.isBuffering = false; updatePlayerUI(); });
+  state.audio.addEventListener('play', () => {
+    state.isPlaying = true;
+    state.isBuffering = false;
+    updatePlayerUI();
+  });
+
+  state.audio.addEventListener('pause', () => {
+    state.isPlaying = false;
+    state.isBuffering = false;
+    updatePlayerUI();
+  });
+
+  state.audio.addEventListener('waiting', () => {
+    state.isBuffering = true;
+    updatePlayerUI();
+  });
+
+  state.audio.addEventListener('canplay', () => {
+    state.isBuffering = false;
+    updatePlayerUI();
+  });
+
+  state.audio.addEventListener('playing', () => {
+    state.isBuffering = false;
+    updatePlayerUI();
+  });
+
   state.audio.addEventListener('error', () => {
-    state.isPlaying = false; state.isBuffering = false; updatePlayerUI();
+    console.error('Audio error');
+    state.isPlaying = false;
+    state.isBuffering = false;
+    updatePlayerUI();
     if (state.currentStation && state.currentStation.url && state.currentStation.url !== state.audio.src) {
       state.audio.src = state.currentStation.url;
       state.audio.play().catch(() => {});
@@ -522,31 +506,43 @@ function initAudio() {
 
 function playStation(station) {
   if (!station) return;
-  if (state.currentStation?.stationuuid === station.stationuuid && state.isPlaying) { pauseAudio(); return; }
+
+  if (state.currentStation?.stationuuid === station.stationuuid && state.isPlaying) {
+    pauseAudio();
+    return;
+  }
 
   state.currentStation = station;
   state.isBuffering = true;
   updatePlayerUI();
-  updateHash(station.stationuuid);
-  addRecent(station.stationuuid);
 
-  if (state.audioCtx) { state.audioCtx.close(); state.audioCtx = null; state.analyser = null; }
   state.audio.src = station.url_resolved || station.url;
   state.audio.play().catch(err => {
+    console.error('Play failed:', err);
     state.isBuffering = false;
-    if (station.url && station.url !== state.audio.src) { state.audio.src = station.url; state.audio.play().catch(() => {}); }
-  }).then(() => {
-    connectVisualizer();
+    if (station.url && station.url !== state.audio.src) {
+      state.audio.src = station.url;
+      state.audio.play().catch(() => {});
+    }
   });
+
   highlightStation(station.stationuuid);
 }
 
-function pauseAudio() { state.audio.pause(); state.isPlaying = false; state.isBuffering = false; updatePlayerUI(); }
+function pauseAudio() {
+  state.audio.pause();
+  state.isPlaying = false;
+  state.isBuffering = false;
+  updatePlayerUI();
+}
 
 function togglePlay() {
   if (!state.currentStation) return;
-  if (state.isPlaying) pauseAudio();
-  else state.audio.play().catch(() => {});
+  if (state.isPlaying) {
+    pauseAudio();
+  } else {
+    state.audio.play().catch(() => {});
+  }
 }
 
 function updateVolumeDisplay() {
@@ -562,27 +558,34 @@ function updatePlayerUI() {
   const nameEl = $('#player-name');
   const metaEl = $('#player-meta');
   const favBtn = $('#favorite-btn');
-  const shareBtn = $('#share-btn');
-  const viz = $('#visualizer');
 
   if (!state.currentStation) {
-    playBtn.disabled = true; favBtn.disabled = true; shareBtn.disabled = true;
-    nameEl.textContent = 'Select a station'; metaEl.textContent = '';
-    playIcon.style.display = 'block'; pauseIcon.style.display = 'none'; spinner.style.display = 'none';
-    if (viz) viz.style.display = 'none';
+    playBtn.disabled = true;
+    favBtn.disabled = true;
+    nameEl.textContent = 'Select a station';
+    metaEl.textContent = '';
+    playIcon.style.display = 'block';
+    pauseIcon.style.display = 'none';
+    spinner.style.display = 'none';
     return;
   }
-  playBtn.disabled = false; favBtn.disabled = false; shareBtn.disabled = false;
+
+  playBtn.disabled = false;
+  favBtn.disabled = false;
 
   if (state.isBuffering) {
-    playIcon.style.display = 'none'; pauseIcon.style.display = 'none'; spinner.style.display = 'flex';
+    playIcon.style.display = 'none';
+    pauseIcon.style.display = 'none';
+    spinner.style.display = 'flex';
   } else if (state.isPlaying) {
-    playIcon.style.display = 'none'; pauseIcon.style.display = 'block'; spinner.style.display = 'none';
+    playIcon.style.display = 'none';
+    pauseIcon.style.display = 'block';
+    spinner.style.display = 'none';
   } else {
-    playIcon.style.display = 'block'; pauseIcon.style.display = 'none'; spinner.style.display = 'none';
+    playIcon.style.display = 'block';
+    pauseIcon.style.display = 'none';
+    spinner.style.display = 'none';
   }
-
-  if (viz) viz.style.display = state.isPlaying && !state.isBuffering ? 'block' : 'none';
 
   nameEl.textContent = state.currentStation.name;
   const tag = state.currentStation._tags[0] || state.currentStation.codec || 'radio';
@@ -596,23 +599,43 @@ function updatePlayerUI() {
 
 /* ===== Favorites ===== */
 function loadFavorites() {
-  try { state.favorites = new Set(JSON.parse(localStorage.getItem('radio-favorites') || '[]')); }
-  catch { state.favorites = new Set(); }
+  try {
+    const data = JSON.parse(localStorage.getItem('radio-favorites') || '[]');
+    state.favorites = new Set(data);
+  } catch {
+    state.favorites = new Set();
+  }
 }
-function saveFavorites() { localStorage.setItem('radio-favorites', JSON.stringify([...state.favorites])); }
+
+function saveFavorites() {
+  localStorage.setItem('radio-favorites', JSON.stringify([...state.favorites]));
+}
 
 function toggleFavorite(stationuuid) {
-  if (state.favorites.has(stationuuid)) state.favorites.delete(stationuuid);
-  else state.favorites.add(stationuuid);
+  if (state.favorites.has(stationuuid)) {
+    state.favorites.delete(stationuuid);
+  } else {
+    state.favorites.add(stationuuid);
+  }
   saveFavorites();
+
   const card = $(`.station-card[data-uuid="${stationuuid}"]`);
   if (card) {
     card.classList.toggle('favorite', state.favorites.has(stationuuid));
+    const favBtn = card.querySelector('.card-fav');
     const isFav = state.favorites.has(stationuuid);
-    card.querySelector('.card-fav').innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>`;
+    favBtn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="${isFav ? '#ef4444' : 'none'}" stroke="currentColor" stroke-width="2">
+      <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path>
+    </svg>`;
   }
-  if (state.currentStation?.stationuuid === stationuuid) updatePlayerUI();
-  if (state.activeFilters.favoritesOnly) applyFilters();
+
+  if (state.currentStation?.stationuuid === stationuuid) {
+    updatePlayerUI();
+  }
+
+  if (state.activeFilters.favoritesOnly) {
+    applyFilters();
+  }
 }
 
 /* ===== Filters UI ===== */
@@ -629,24 +652,36 @@ function updateFilterOptions() {
   countrySel.innerHTML = '<option value="">All Countries</option>';
   countryOptions.forEach(([country, count]) => {
     const opt = document.createElement('option');
-    opt.value = country; opt.textContent = `${country} (${count})`;
+    opt.value = country;
+    opt.textContent = `${country} (${count})`;
     if (country === currentCountry) opt.selected = true;
     countrySel.appendChild(opt);
   });
+
   genreSel.innerHTML = '<option value="">All Genres</option>';
   genreOptions.forEach(([genre, count]) => {
     const opt = document.createElement('option');
-    opt.value = genre; opt.textContent = `${genre} (${count})`;
+    opt.value = genre;
+    opt.textContent = `${genre} (${count})`;
     if (genre === currentGenre) opt.selected = true;
     genreSel.appendChild(opt);
   });
+
   $('#country-badge').textContent = countryOptions.length;
   $('#genre-badge').textContent = genreOptions.length;
 }
 
 function initFilters() {
-  $('#country-filter').addEventListener('change', (e) => { state.activeFilters.country = e.target.value; applyFilters(); });
-  $('#genre-filter').addEventListener('change', (e) => { state.activeFilters.genre = e.target.value; applyFilters(); });
+  $('#country-filter').addEventListener('change', (e) => {
+    state.activeFilters.country = e.target.value;
+    applyFilters();
+  });
+
+  $('#genre-filter').addEventListener('change', (e) => {
+    state.activeFilters.genre = e.target.value;
+    applyFilters();
+  });
+
   $('#favorites-toggle').addEventListener('click', () => {
     state.activeFilters.favoritesOnly = !state.activeFilters.favoritesOnly;
     $('#favorites-toggle').classList.toggle('active', state.activeFilters.favoritesOnly);
@@ -658,20 +693,35 @@ function initFilters() {
 function matchesSearch(station, query) {
   if (!query) return true;
   const q = query.toLowerCase();
-  return station.name.toLowerCase().includes(q) || (station.country || '').toLowerCase().includes(q) ||
-    (station.tags || '').toLowerCase().includes(q) || (station.state || '').toLowerCase().includes(q);
+  return station.name.toLowerCase().includes(q) ||
+    (station.country || '').toLowerCase().includes(q) ||
+    (station.tags || '').toLowerCase().includes(q) ||
+    (station.state || '').toLowerCase().includes(q);
 }
 
 function initSearch() {
   const modal = $('#search-modal');
   const input = $('#search-input');
+
   document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key === 'k') { e.preventDefault(); openSearch(); }
-    if (e.key === 'Escape' && modal.classList.contains('open')) closeSearch();
-    if (modal.classList.contains('open')) handleSearchNav(e);
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+      e.preventDefault();
+      openSearch();
+    }
+    if (e.key === 'Escape' && modal.classList.contains('open')) {
+      closeSearch();
+    }
+    if (modal.classList.contains('open')) {
+      handleSearchNav(e);
+    }
   });
+
   $('.search-backdrop').addEventListener('click', closeSearch);
-  input.addEventListener('input', (e) => { state.searchQuery = e.target.value.trim(); renderSearchResults(); });
+
+  input.addEventListener('input', (e) => {
+    state.searchQuery = e.target.value.trim();
+    renderSearchResults();
+  });
 }
 
 function openSearch() {
@@ -681,22 +731,53 @@ function openSearch() {
   renderSearchResults();
 }
 
-function closeSearch() { $('#search-modal').classList.remove('open'); state.searchSelectedIndex = -1; state.searchQuery = ''; }
+function closeSearch() {
+  $('#search-modal').classList.remove('open');
+  state.searchSelectedIndex = -1;
+  state.searchQuery = '';
+}
 
 function renderSearchResults() {
   const results = $('#search-results');
   const query = state.searchQuery.toLowerCase();
-  if (!query) { results.innerHTML = '<div class="search-empty">Type to search stations, countries, or genres</div>'; return; }
+
+  if (!query) {
+    results.innerHTML = '<div class="search-empty">Type to search stations, countries, or genres</div>';
+    return;
+  }
+
   const matches = state.allStations.filter(s => matchesSearch(s, query)).slice(0, 50);
-  if (matches.length === 0) { results.innerHTML = '<div class="search-empty">No stations found</div>'; return; }
+
+  if (matches.length === 0) {
+    results.innerHTML = '<div class="search-empty">No stations found</div>';
+    return;
+  }
+
   results.innerHTML = '';
   matches.forEach((station, i) => {
     const el = document.createElement('div');
-    el.className = 'search-result-item'; el.dataset.index = i; el.dataset.uuid = station.stationuuid; el.role = 'option';
+    el.className = 'search-result-item';
+    el.dataset.index = i;
+    el.dataset.uuid = station.stationuuid;
+    el.role = 'option';
     if (i === state.searchSelectedIndex) el.classList.add('selected');
+
     const tag = station._tags[0] || station.codec || 'radio';
-    el.innerHTML = `<div class="search-result-dot" style="background:${station._color}"></div><div class="search-result-info"><div class="search-result-name">${escapeHtml(station.name)}</div><div class="search-result-meta">${escapeHtml(station.country || 'Unknown')} · ${escapeHtml(tag)}</div></div>`;
-    el.addEventListener('click', () => { playStation(station); highlightStation(station.stationuuid); scrollToCard(station.stationuuid); closeSearch(); });
+    el.innerHTML = `
+      <div class="search-result-dot" style="background:${station._color}"></div>
+      <div class="search-result-info">
+        <div class="search-result-name">${escapeHtml(station.name)}</div>
+        <div class="search-result-meta">${escapeHtml(station.country || 'Unknown')} · ${escapeHtml(tag)}</div>
+      </div>
+    `;
+
+    el.addEventListener('click', () => {
+      playStation(station);
+      highlightStation(station.stationuuid);
+      scrollToCard(station.stationuuid);
+      closeSearch();
+    });
+
     results.appendChild(el);
   });
 }
@@ -704,36 +785,86 @@ function renderSearchResults() {
 function handleSearchNav(e) {
   const items = $$('.search-result-item');
   if (!items.length) return;
-  if (e.key === 'ArrowDown') { e.preventDefault(); state.searchSelectedIndex = (state.searchSelectedIndex + 1) % items.length; updateSearchSelection(); }
-  else if (e.key === 'ArrowUp') { e.preventDefault(); state.searchSelectedIndex = state.searchSelectedIndex <= 0 ? items.length - 1 : state.searchSelectedIndex - 1; updateSearchSelection(); }
-  else if (e.key === 'Enter') {
+
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    state.searchSelectedIndex = (state.searchSelectedIndex + 1) % items.length;
+    updateSearchSelection();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    state.searchSelectedIndex = state.searchSelectedIndex <= 0 ? items.length - 1 : state.searchSelectedIndex - 1;
+    updateSearchSelection();
+  } else if (e.key === 'Enter') {
     e.preventDefault();
     const selected = items[state.searchSelectedIndex];
-    if (selected) { const station = state.allStations.find(s => s.stationuuid === selected.dataset.uuid); if (station) { playStation(station); highlightStation(station.stationuuid); scrollToCard(station.stationuuid); closeSearch(); } }
+    if (selected) {
+      const uuid = selected.dataset.uuid;
+      const station = state.allStations.find(s => s.stationuuid === uuid);
+      if (station) {
+        playStation(station);
+        highlightStation(uuid);
+        scrollToCard(uuid);
+        closeSearch();
+      }
+    }
   }
 }
 
 function updateSearchSelection() {
-  $$('.search-result-item').forEach((el, i) => { el.classList.toggle('selected', i === state.searchSelectedIndex); if (i === state.searchSelectedIndex) el.scrollIntoView({ block: 'nearest' }); });
+  $$('.search-result-item').forEach((el, i) => {
+    el.classList.toggle('selected', i === state.searchSelectedIndex);
+    if (i === state.searchSelectedIndex) {
+      el.scrollIntoView({ block: 'nearest' });
+    }
+  });
 }
 
 /* ===== Sleep Timer ===== */
 function initSleepTimer() {
-  $('#sleep-btn').addEventListener('click', () => { $('#sleep-menu').classList.toggle('open'); });
-  $('#sleep-menu').addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') { setSleepTimer(parseInt(e.target.dataset.min)); $('#sleep-menu').classList.remove('open'); } });
-  document.addEventListener('click', (e) => { if (!e.target.closest('.sleep-wrap')) $('#sleep-menu').classList.remove('open'); });
+  $('#sleep-btn').addEventListener('click', () => {
+    $('#sleep-menu').classList.toggle('open');
+  });
+
+  $('#sleep-menu').addEventListener('click', (e) => {
+    if (e.target.tagName === 'BUTTON') {
+      const mins = parseInt(e.target.dataset.min);
+      setSleepTimer(mins);
+      $('#sleep-menu').classList.remove('open');
+    }
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('.sleep-wrap')) {
+      $('#sleep-menu').classList.remove('open');
+    }
+  });
 }
 
 function setSleepTimer(minutes) {
-  if (state.sleepTimerId) { clearInterval(state.sleepTimerId); state.sleepTimerId = null; }
+  if (state.sleepTimerId) {
+    clearInterval(state.sleepTimerId);
+    state.sleepTimerId = null;
+  }
   state.sleepRemaining = 0;
-  if (minutes <= 0) { $('#sleep-display').textContent = ''; return; }
+
+  if (minutes <= 0) {
+    $('#sleep-display').textContent = '';
+    return;
+  }
+
   state.sleepRemaining = minutes * 60;
   $('#sleep-display').textContent = formatTime(state.sleepRemaining);
+
   state.sleepTimerId = setInterval(() => {
     state.sleepRemaining--;
-    if (state.sleepRemaining <= 0) { clearInterval(state.sleepTimerId); state.sleepTimerId = null; pauseAudio(); $('#sleep-display').textContent = ''; }
-    else $('#sleep-display').textContent = formatTime(state.sleepRemaining);
+    if (state.sleepRemaining <= 0) {
+      clearInterval(state.sleepTimerId);
+      state.sleepTimerId = null;
+      pauseAudio();
+      $('#sleep-display').textContent = '';
+    } else {
+      $('#sleep-display').textContent = formatTime(state.sleepRemaining);
+    }
   }, 1000);
 }
 
@@ -747,55 +878,68 @@ function updateUI() {
   document.title = `Global Radio — ${count} station${count !== 1 ? 's' : ''}`;
 }
 
-/* ===== Service Worker ===== */
-function registerSW() {
-  if ('serviceWorker' in navigator) {
-    navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`).catch(() => {});
-  }
-}
-
 /* ===== Initialization ===== */
 async function init() {
   loadTheme();
   loadFavorites();
-  loadRecent();
   readFiltersFromURL();
   initAudio();
-  initVisualizer();
+  initGlobe();
   initFilters();
   initSearch();
   initSleepTimer();
   updateVolumeDisplay();
-  registerSW();
 
+  // mute toggle
   $('#mute-btn').addEventListener('click', () => {
-    if (state.isMuted) { state.audio.volume = state.previousVolume; $('#volume').value = state.previousVolume; state.isMuted = false; }
-    else { state.previousVolume = state.audio.volume; state.audio.volume = 0; $('#volume').value = 0; state.isMuted = true; }
+    if (state.isMuted) {
+      state.audio.volume = state.previousVolume;
+      $('#volume').value = state.previousVolume;
+      state.isMuted = false;
+    } else {
+      state.previousVolume = state.audio.volume;
+      state.audio.volume = 0;
+      $('#volume').value = 0;
+      state.isMuted = true;
+    }
+    updateVolumeDisplay();
+    updatePlayerUI();
+  });
+
+  $('#volume').addEventListener('input', (e) => {
+    const vol = parseFloat(e.target.value);
+    state.audio.volume = vol;
+    state.isMuted = vol === 0;
+    localStorage.setItem(VOLUME_STORAGE_KEY, vol);
     updateVolumeDisplay();
   });
-  $('#volume').addEventListener('input', (e) => {
-    const vol = parseFloat(e.target.value); state.audio.volume = vol; state.isMuted = vol === 0;
-    localStorage.setItem(VOLUME_STORAGE_KEY, vol); updateVolumeDisplay();
-  });
+
   $('#play-btn').addEventListener('click', togglePlay);
-  $('#favorite-btn').addEventListener('click', () => { if (state.currentStation) toggleFavorite(state.currentStation.stationuuid); });
-  $('#theme-toggle').addEventListener('click', toggleTheme);
-  $('#share-btn').addEventListener('click', shareStation);
-  $('#clear-filters-btn').addEventListener('click', () => {
-    state.activeFilters.country = ''; state.activeFilters.genre = ''; state.activeFilters.favoritesOnly = false;
-    $('#favorites-toggle').classList.remove('active'); applyFilters();
+  $('#favorite-btn').addEventListener('click', () => {
+    if (state.currentStation) toggleFavorite(state.currentStation.stationuuid);
   });
+  $('#theme-toggle').addEventListener('click', toggleTheme);
+  $('#clear-filters-btn').addEventListener('click', () => {
+    state.activeFilters.country = '';
+    state.activeFilters.genre = '';
+    state.activeFilters.favoritesOnly = false;
+    $('#favorites-toggle').classList.remove('active');
+    applyFilters();
+  });
+
+  // Retry on loading error
   $('#retry-btn').addEventListener('click', () => {
-    $('#retry-btn').style.display = 'none'; $('.loading-text').textContent = 'Loading stations…'; $('#loading-sub').textContent = 'Fetching global radio from radio-browser.info';
+    $('#retry-btn').style.display = 'none';
+    $('.loading-text').textContent = 'Loading stations…';
+    $('#loading-sub').textContent = 'Fetching global radio from radio-browser.info';
     init();
   });
 
   try {
-    const [stations] = await Promise.all([loadStations(), initGlobe()]);
+    await loadStations();
     applyFilters();
     $('#loading').classList.add('hidden');
     $('#main-layout').style.display = 'flex';
-    readStationFromHash();
   } catch (err) {
     console.error('Failed to load stations:', err);
     $('.loading-text').textContent = 'Failed to load stations';
