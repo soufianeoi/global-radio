@@ -15,8 +15,8 @@ const DOT_COLORS = {
   favorite: '#f59e0b',
   highlighted: '#3b82f6'
 };
-const GLOBE_TEXTURE = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
-const GLOBE_TEXTURE_FALLBACK = 'https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg';
+const GLOBE_TEXTURE = '/earth-texture.jpg';
+const GLOBE_TEXTURE_FALLBACK = '/earth-texture.jpg';
 const VOLUME_STORAGE_KEY = 'radio-volume';
 
 /* ===== State ===== */
