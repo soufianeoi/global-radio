@@ -1,15 +1,9 @@
-const CACHE = 'global-radio-v1';
-const ASSETS = [
-  './',
-  './index.html',
-  './src/style.css',
-  './src/main.js',
-  './earth-texture.jpg'
-];
+const CACHE = 'global-radio-v2';
+const CACHE_URLS = ['./', './index.html'];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
-    caches.open(CACHE).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE).then((cache) => cache.addAll(CACHE_URLS))
   );
   self.skipWaiting();
 });
@@ -24,6 +18,12 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  if (event.request.mode === 'navigate') {
+    event.respondWith(
+      fetch(event.request).catch(() => caches.match(event.request))
+    );
+    return;
+  }
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))
   );
