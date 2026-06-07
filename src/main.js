@@ -1,10 +1,10 @@
 import Globe from 'globe.gl';
 
 /* ===== Config ===== */
-const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/2000';
+const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/300';
 const RETRIES = 3;
 const RETRY_DELAY = 1500;
-const FETCH_TIMEOUT = 30000;
+const FETCH_TIMEOUT = 12000;
 const KNOWN_CODECS = ['MP3', 'AAC', 'OGG', 'OPUS', 'FLAC', 'WMA', 'WAV'];
 const GENRE_PALETTE = [
   '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981',
