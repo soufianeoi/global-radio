@@ -2,8 +2,6 @@
 
 A single-page web app for exploring and playing global internet radio stations on an interactive 3D globe.
 
-![screenshot](https://user-images.githubusercontent.com/placeholder.png)
-
 ## Features
 
 - **3D Globe** — Interactive WebGL globe with station markers using [globe.gl](https://globe.gl/)
