@@ -1,7 +1,7 @@
 import Globe from 'globe.gl';
 
 /* ===== Config ===== */
-const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/500';
+const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/2000';
 const RETRIES = 3;
 const RETRY_DELAY = 1500;
 const FETCH_TIMEOUT = 12000;
