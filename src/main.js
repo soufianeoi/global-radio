@@ -137,14 +137,22 @@ function parseTags(station) {
 
 async function loadStations() {
   const data = await fetchWithRetry(API_URL);
-  state.allStations = data.filter(isHealthy).map((s, i) => ({
-    ...s,
-    _idx: i,
-    _tags: parseTags(s),
-    _color: getStationColor(s),
-    _lat: parseFloat(s.geo_lat),
-    _lng: parseFloat(s.geo_long),
-  }));
+  state.allStations = data.map((s, i) => {
+    const url = s.url_resolved || s.url;
+    const codec = (s.codec || '').toUpperCase();
+    const lat = parseFloat(s.geo_lat);
+    const lng = parseFloat(s.geo_long);
+    return {
+      ...s,
+      _idx: i,
+      _tags: parseTags(s),
+      _color: getStationColor(s),
+      _lat: lat,
+      _lng: lng,
+      _hasGeo: !isNaN(lat) && !isNaN(lng) && !(lat === 0 && lng === 0),
+      _isPlayable: !!url && url.startsWith('https://') && !!codec && KNOWN_CODECS.some(k => codec.includes(k)),
+    };
+  });
 }
 
 /* ===== Marker Cache ===== */
@@ -270,7 +278,7 @@ function initGlobe() {
 
 function updateGlobe() {
   if (!state.globe) return;
-  const points = state.filteredStations.map(s => getMarkerData(s));
+  const points = state.filteredStations.filter(s => s._hasGeo).map(s => getMarkerData(s));
   state.globe.pointsData(points);
 }
 
@@ -350,6 +358,8 @@ function renderCards() {
       <div class="card-meta">
         <span class="card-tag">${escapeHtml(station.country || 'Unknown')}</span>
         <span class="card-tag">${escapeHtml(topTag)}</span>
+        ${station._hasGeo ? '' : '<span class="card-tag card-tag-warn">no location</span>'}
+        ${station._isPlayable ? '' : '<span class="card-tag card-tag-warn">stream may not play</span>'}
       </div>
     `;
 

@@ -442,6 +442,16 @@ input:focus, select:focus, button:focus-visible {
   max-width: 100%;
 }
 
+.card-tag-warn {
+  color: #d97706;
+  background: #fef3c7;
+}
+
+.dark .card-tag-warn {
+  color: #fbbf24;
+  background: #78350f;
+}
+
 /* ===== Empty State ===== */
 .empty-state {
   flex: 1;
