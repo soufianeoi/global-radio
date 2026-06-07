@@ -5,13 +5,11 @@ A single-page web app for exploring and playing global internet radio stations o
 ## Screenshot
 
 ![Global Radio screenshot](screenshot.png)
-<!-- Replace `screenshot.png` with an actual screenshot of the app.
-     Take one manually from your browser: full viewport showing globe + station grid + player bar. -->
 
 ## Features
 
 - **3D Globe** — Interactive WebGL globe with station markers using [globe.gl](https://globe.gl/)
-- **Live Radio Data** — Fetches 500 top-clicked stations from [radio-browser.info](https://www.radio-browser.info/) with client-side health filtering
+- **Live Radio Data** — Fetches 300 top-clicked stations from [radio-browser.info](https://www.radio-browser.info/) with client-side health filtering
 - **Station Cards** — Three-column grid with country, genre tags, and color-coded status dots with equalizer animation on playback
 - **Two-Way Sync** — Hover/click a globe marker or a station card; both highlight and scroll in sync
 - **Faceted Filters** — Country + genre dropdowns with live relative counts that recompute as you filter; persisted in the URL
