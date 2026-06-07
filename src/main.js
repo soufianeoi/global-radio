@@ -15,8 +15,8 @@ const DOT_COLORS = {
   favorite: '#f59e0b',
   highlighted: '#3b82f6'
 };
-const GLOBE_TEXTURE = '/earth-texture.jpg';
-const GLOBE_TEXTURE_FALLBACK = '/earth-texture.jpg';
+const GLOBE_TEXTURE = `${import.meta.env.BASE_URL}earth-texture.jpg`;
+const GLOBE_TEXTURE_FALLBACK = `${import.meta.env.BASE_URL}earth-texture.jpg`;
 const VOLUME_STORAGE_KEY = 'radio-volume';
 
 /* ===== State ===== */
@@ -218,8 +218,8 @@ function readFiltersFromURL() {
 /* ===== Globe ===== */
 function initGlobe() {
   const container = $('#globe-container');
-  const w = container.clientWidth;
-  const h = container.clientHeight;
+  const w = Math.max(container.clientWidth, 300);
+  const h = Math.max(container.clientHeight, 200);
 
   state.globe = Globe()(container)
     .width(w)
@@ -252,11 +252,14 @@ function initGlobe() {
     img.src = GLOBE_TEXTURE;
   }
 
-  window.addEventListener('resize', () => {
+  const ro = new ResizeObserver(() => {
     const w = container.clientWidth;
     const h = container.clientHeight;
-    state.globe.width(w).height(h);
+    if (w > 0 && h > 0 && state.globe) {
+      state.globe.width(w).height(h);
+    }
   });
+  ro.observe(container);
 }
 
 function updateGlobe() {
