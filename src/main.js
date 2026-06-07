@@ -2,6 +2,7 @@
 const API_URL = 'https://all.api.radio-browser.info/json/stations/topclick/500';
 const RETRIES = 3;
 const RETRY_DELAY = 1500;
+const FETCH_TIMEOUT = 12000;
 const KNOWN_CODECS = ['MP3', 'AAC', 'OGG', 'OPUS', 'FLAC', 'WMA', 'WAV'];
 const GENRE_PALETTE = [
   '#ef4444', '#f97316', '#f59e0b', '#84cc16', '#10b981',
@@ -95,17 +96,18 @@ function loadTheme() {
 /* ===== Data Fetching ===== */
 async function fetchWithRetry(url, retries = RETRIES) {
   for (let i = 0; i < retries; i++) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), FETCH_TIMEOUT);
     try {
-      const res = await fetch(url, {
-        headers: { 'User-Agent': 'GlobalRadioApp/1.0' },
-        mode: 'cors'
-      });
+      const res = await fetch(url, { signal: ac.signal, mode: 'cors' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json();
     } catch (err) {
       console.warn(`Fetch attempt ${i + 1} failed:`, err.message);
       if (i === retries - 1) throw err;
       await sleep(RETRY_DELAY * (i + 1));
+    } finally {
+      clearTimeout(timer);
     }
   }
 }
